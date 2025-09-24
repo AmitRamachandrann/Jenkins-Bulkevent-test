@@ -11,8 +11,11 @@ on:
 jobs:
   build:
     steps:
-      - name: Say hello
-        uses: docker://golang:1.20.3-alpine3.17
-        shell: sh
-        run: |
-          echo "hello world" 
+      - name: checkout Source Code
+        uses: cloudbees-io/checkout@v1
+
+      - id: gitleaks-step
+        name: gitleaks hybrid plugin scan
+        uses: cloudbees-io/gitleaks-plugin@v1
+
+      
