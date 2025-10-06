@@ -1,52 +1,70 @@
 pipeline {
     agent any
 
+    environment {
+        SARIF_FILE = "gitleaks-report.sarif"
+        GITLEAKS_BIN = "${WORKSPACE}/bin"
+        PATH = "${GITLEAKS_BIN}:${env.PATH}"
+    }
+
     stages {
-        stage('Build') {
-            stages {
-                stage('Compile') {
-                    steps {
-                        echo 'Compiling...'
-                        sleep 10
+
+        stage('Install Gitleaks') {
+            steps {
+                sh '''
+                    mkdir -p $GITLEAKS_BIN
+                    if ! [ -x "$GITLEAKS_BIN/gitleaks" ]; then
+                        echo "Installing gitleaks locally in $GITLEAKS_BIN ..."
+                        GITLEAKS_VERSION=8.18.1
+                        curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz \
+                        -o gitleaks.tar.gz
+                        tar -xzf gitleaks.tar.gz -C $GITLEAKS_BIN gitleaks
+                        chmod +x $GITLEAKS_BIN/gitleaks
+                    fi
+                    gitleaks version
+                '''
+            }
+        }
+
+        stage('Prepare SARIF File') {
+            steps {
+                sh """
+                    if [ -f "${SARIF_FILE}" ]; then
+                        rm -f "${SARIF_FILE}"
+                    fi
+                """
+            }
+        }
+
+        stage('Run Gitleaks Scan') {
+            steps {
+                sh """
+                    ${GITLEAKS_BIN}/gitleaks detect \
+                    --no-git \
+                    --source . \
+                    --report-format sarif \
+                    --report-path ${SARIF_FILE} || true
+                """
+            }
+        }
+
+        stage('Show SARIF Output') {
+            steps {
+                script {
+                    if (fileExists("${SARIF_FILE}")) {
+                        def sarifReport = readFile("${SARIF_FILE}")
+                        echo "===== Gitleaks SARIF Report ====="
+                        echo sarifReport
+                    } else {
+                        echo "No SARIF report found"
                     }
                 }
-                stage('Package') {
-                    steps {
-                        echo 'Packaging...'
-                        sleep 5
-                    }
-                }
             }
         }
 
-        stage('Registering build artifact') {
+        stage('Archive SARIF Report') {
             steps {
-                echo 'Registering the metadata'
-                echo 'Another echo to make the pipeline a bit more complex'
-                registerBuildArtifactMetadata(
-                    name: "artifacts-ninja-PROD-e2e-testing-02",
-                    version: "0.0.2",
-                    type: "docker",
-                    url: "http://your-url-here.com",
-                    digest: "6f637064707039346163663237383938",
-                    label: "PROD-ninja"
-                )
-            }
-        }
-
-        stage('Test') {
-            steps {
-                echo 'Running Unit Tests...'
-                sleep 10
-                echo 'Running Integration Tests...'
-                sleep 5
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                echo 'Deploying...'
-                sleep 5
+                archiveArtifacts artifacts: "${SARIF_FILE}", fingerprint: true
             }
         }
     }
